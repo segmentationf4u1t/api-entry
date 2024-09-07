@@ -13,6 +13,8 @@ This project serves as a robust starting point for building scalable web APIs us
 - Modular project structure
 
 ## Project Structure
+
+```
 src/
 ├── auth/
 ├── db/
@@ -25,6 +27,7 @@ src/
 ├── error.rs
 ├── logger.rs
 └── main.rs
+```
 
 
 ## Getting Started
