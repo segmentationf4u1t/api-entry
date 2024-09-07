@@ -13,6 +13,7 @@ use governor::clock::Clock;
 use crate::error::AppError;
 use std::num::NonZeroU32;
 
+// RateLimiter struct that holds the GovernorRateLimiter
 #[derive(Clone)]
 pub struct RateLimiter {
     limiter: Arc<GovernorRateLimiter<String, governor::state::keyed::DashMapStateStore<String>, DefaultClock>>,
@@ -20,7 +21,8 @@ pub struct RateLimiter {
 
 impl Default for RateLimiter {
     fn default() -> Self {
-        let quota = Quota::per_second(nonzero!(10u32)); // Changed to 10 requests per second
+        // Create a default rate limiter with 10 requests per second
+        let quota = Quota::per_second(nonzero!(10u32));
         RateLimiter {
             limiter: Arc::new(GovernorRateLimiter::keyed(quota)),
         }
@@ -28,6 +30,7 @@ impl Default for RateLimiter {
 }
 
 impl RateLimiter {
+    // Create a new RateLimiter with specified requests per second and burst size
     pub fn new(requests_per_second: u32, burst_size: u32) -> Self {
         let quota = Quota::per_second(NonZeroU32::new(requests_per_second).unwrap())
             .allow_burst(NonZeroU32::new(burst_size).unwrap());
@@ -37,6 +40,7 @@ impl RateLimiter {
     }
 }
 
+// Implement Transform trait for RateLimiter
 impl<S, B> Transform<S, ServiceRequest> for RateLimiter
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
@@ -49,6 +53,7 @@ where
     type Transform = RateLimiterMiddleware<S>;
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
+    // Create a new RateLimiterMiddleware
     fn new_transform(&self, service: S) -> Self::Future {
         ok(RateLimiterMiddleware {
             service,
@@ -57,11 +62,13 @@ where
     }
 }
 
+// RateLimiterMiddleware struct that wraps the inner service
 pub struct RateLimiterMiddleware<S> {
     service: S,
     limiter: Arc<GovernorRateLimiter<String, governor::state::keyed::DashMapStateStore<String>, DefaultClock>>,
 }
 
+// Implement Service trait for RateLimiterMiddleware
 impl<S, B> Service<ServiceRequest> for RateLimiterMiddleware<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
@@ -72,10 +79,12 @@ where
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
+    // Check if the service is ready
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
+    // Handle the incoming request
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let ip = req.peer_addr().map(|addr| addr.ip().to_string()).unwrap_or_else(|| "unknown".to_string());
         let path = req.path().to_string();
@@ -86,8 +95,10 @@ where
         let limiter = self.limiter.clone();
 
         Box::pin(async move {
+            // Check if the request is allowed by the rate limiter
             match limiter.check_key(&ip) {
                 Ok(_) => {
+                    // Log allowed request
                     info!(
                         target: "rate_limiter",
                         "Request allowed - Timestamp: {}, IP: {}, Method: {}, Path: {}",
@@ -96,6 +107,7 @@ where
                     fut.await
                 },
                 Err(negative) => {
+                    // Calculate wait time and log rate limit exceeded
                     let wait_time = negative.wait_time_from(DefaultClock::default().now());
                     warn!(
                         target: "rate_limiter",
