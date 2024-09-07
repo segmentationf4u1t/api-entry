@@ -3,9 +3,12 @@ use serde::Serialize;
 use std::fmt;
 use thiserror::Error;
 
-#[allow(dead_code)] // Add this line to suppress dead code warnings for the entire enum
+// Define custom error types for the application
+// The #[allow(dead_code)] attribute suppresses warnings for unused enum variants
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum AppError {
+    // Define various error types with associated error messages
     #[error("Internal Server Error")]
     InternalServerError,
     #[error("Not Found")]
@@ -18,6 +21,8 @@ pub enum AppError {
     RateLimitExceeded,
 }
 
+// Define the structure for error responses
+// This will be serialized to JSON when sent to the client
 #[derive(Serialize)]
 pub struct ErrorResponse {
     pub code: u16,
@@ -25,7 +30,10 @@ pub struct ErrorResponse {
     pub error_type: String,
 }
 
+// Implement ResponseError trait for AppError
+// This allows our custom error type to be used with actix-web
 impl ResponseError for AppError {
+    // Generate an HTTP response for each error type
     fn error_response(&self) -> HttpResponse {
         let status_code = self.status_code();
         let error_response = ErrorResponse {
@@ -36,6 +44,7 @@ impl ResponseError for AppError {
         HttpResponse::build(status_code).json(error_response)
     }
 
+    // Map AppError variants to HTTP status codes
     fn status_code(&self) -> StatusCode {
         match *self {
             AppError::InternalServerError => StatusCode::INTERNAL_SERVER_ERROR,
@@ -47,6 +56,8 @@ impl ResponseError for AppError {
     }
 }
 
+// Implement Display trait for ErrorResponse
+// This allows the ErrorResponse to be easily converted to a string
 impl fmt::Display for ErrorResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
