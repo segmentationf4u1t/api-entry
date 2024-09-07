@@ -1,0 +1,19 @@
+[database]
+url = "your_database_name"
+username = "your_username"
+password = "your_password"
+host = "localhost"
+port = 5432
+max_connections = 5
+
+[server]
+host = "127.0.0.1"
+port = 8080
+
+[rate_limit]
+requests_per_second = 100
+burst_size = 100
+
+[log]
+level = "info"
+file = "logs/app.log"

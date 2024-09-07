@@ -1,35 +1,24 @@
-use deadpool_postgres::Client;
-use tokio_postgres::Error as PgError;
+use deadpool_postgres::{Config, Pool, Runtime};
+use tokio_postgres::NoTls;
+use crate::config::DatabaseConfig;
 
-pub async fn create_user_table(client: &Client) -> Result<(), PgError> {
-    client
-        .execute(
-            "CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(50) UNIQUE NOT NULL,
-                password VARCHAR(100) NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            )",
-            &[],
-        )
-        .await?;
+pub async fn insert_user(client: &deadpool_postgres::Client, username: &str, hashed_password: &str) -> Result<(), tokio_postgres::Error> {
+    client.execute(
+        "INSERT INTO users (username, password_hash) VALUES ($1, $2)",
+        &[&username, &hashed_password],
+    ).await?;
     Ok(())
 }
 
-pub async fn insert_user(client: &Client, username: &str, password: &str) -> Result<(), PgError> {
-    client
-        .execute(
-            "INSERT INTO users (username, password) VALUES ($1, $2)",
-            &[&username, &password],
-        )
-        .await?;
-    Ok(())
-}
-
-pub async fn get_user_by_username(client: &Client, username: &str) -> Result<Option<(i32, String, String)>, PgError> {
-    let row = client
-        .query_opt("SELECT id, username, password FROM users WHERE username = $1", &[&username])
-        .await?;
+pub fn establish_connection(config: &DatabaseConfig) -> Result<Pool, Box<dyn std::error::Error>> {
+    let mut cfg = Config::new();
+    cfg.dbname = Some(config.url.clone());
+    cfg.user = Some(config.username.clone());
+    cfg.password = Some(config.password.clone());
+    cfg.host = Some(config.host.clone());
+    cfg.port = Some(config.port);
     
-    Ok(row.map(|r| (r.get(0), r.get(1), r.get(2))))
+    let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls)?;
+    pool.resize(config.max_connections as usize);
+    Ok(pool)
 }

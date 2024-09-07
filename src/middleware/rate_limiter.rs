@@ -11,7 +11,9 @@ use log::{info, warn};
 use chrono::Utc;
 use governor::clock::Clock;
 use crate::error::AppError;
+use std::num::NonZeroU32;
 
+#[derive(Clone)]
 pub struct RateLimiter {
     limiter: Arc<GovernorRateLimiter<String, governor::state::keyed::DashMapStateStore<String>, DefaultClock>>,
 }
@@ -19,6 +21,16 @@ pub struct RateLimiter {
 impl Default for RateLimiter {
     fn default() -> Self {
         let quota = Quota::per_second(nonzero!(10u32)); // Changed to 10 requests per second
+        RateLimiter {
+            limiter: Arc::new(GovernorRateLimiter::keyed(quota)),
+        }
+    }
+}
+
+impl RateLimiter {
+    pub fn new(requests_per_second: u32, burst_size: u32) -> Self {
+        let quota = Quota::per_second(NonZeroU32::new(requests_per_second).unwrap())
+            .allow_burst(NonZeroU32::new(burst_size).unwrap());
         RateLimiter {
             limiter: Arc::new(GovernorRateLimiter::keyed(quota)),
         }

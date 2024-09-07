@@ -35,11 +35,21 @@ src/
 1. Clone the repository
 2. Install Rust and Cargo
 3. Set up PostgreSQL and create a database
-4. Update the database configuration in `src/main.rs`:
+4. Copy `config.example.toml` to `config.toml` and update the configuration:
+
+   ```
+   cp config.example.toml config.toml
+   ```
+
+   Edit `config.toml` with your specific settings.
 
 5. Run the project:
 
-The server will start on `http://127.0.0.1:8080`.
+   ```
+   cargo run
+   ```
+
+The server will start on the host and port specified in your `config.toml`.
 
 ## API Endpoints
 
@@ -49,9 +59,14 @@ The server will start on `http://127.0.0.1:8080`.
 
 ## Configuration
 
-- Database settings: Update in `src/main.rs`
-- Logging: Configure in `src/main.rs` and `src/logger.rs`
-- Rate limiting: Adjust in `src/middleware/rate_limiter.rs`
+The application uses a `config.toml` file for configuration. You can adjust the following settings:
+
+- Database connection
+- Server host and port
+- Rate limiting parameters
+- Logging level and file location
+
+Refer to `config.toml` for available options.
 
 ## Todo
 

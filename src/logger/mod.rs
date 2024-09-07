@@ -6,7 +6,7 @@ use futures::Future;
 use log::error;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-
+use log::info;
 pub struct Logger;
 
 impl<S, B> Transform<S, ServiceRequest> for Logger
@@ -55,17 +55,15 @@ where
             let res = fut.await?;
             let elapsed = Utc::now().signed_duration_since(start_time).num_milliseconds();
 
+            let log_message = format!(
+                "Request processed - Timestamp: {}, Method: {}, Path: {}, Status: {}, Elapsed: {}ms",
+                start_time, method, path, res.status(), elapsed
+            );
+
             if res.status().is_server_error() {
-                error!(
-                    target: "my_actix_api",
-                    "Error occurred - Timestamp: {}, Method: {}, Path: {}, Status: {}, Elapsed: {}ms",
-                    start_time, method, path, res.status(), elapsed
-                );
+                error!(target: "my_actix_api", "{}", log_message);
             } else {
-                println!(
-                    "Request processed - Timestamp: {}, Method: {}, Path: {}, Status: {}, Elapsed: {}ms",
-                    start_time, method, path, res.status(), elapsed
-                );
+                info!(target: "my_actix_api", "{}", log_message);
             }
 
             Ok(res)
