@@ -9,6 +9,7 @@ use crate::db;
 pub struct RegisterUser {
     username: String,
     password: String,
+    email: String,
 }
 
 #[derive(Serialize)]
@@ -34,7 +35,7 @@ pub async fn register(
     };
 
     // Insert the user into the database
-    if let Err(_) = db::insert_user(&client, &user.username, &hashed_password).await {
+    if let Err(_) = db::insert_user(&client, &user.username, &hashed_password, &user.email).await {
         return HttpResponse::InternalServerError().finish();
     }
 

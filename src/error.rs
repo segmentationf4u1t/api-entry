@@ -19,6 +19,8 @@ pub enum AppError {
     Unauthorized,
     #[error("Rate Limit Exceeded")]
     RateLimitExceeded,
+    #[error("Database error: {0}")]
+    DatabaseError(String),
 }
 
 // Define the structure for error responses
@@ -33,25 +35,14 @@ pub struct ErrorResponse {
 // Implement ResponseError trait for AppError
 // This allows our custom error type to be used with actix-web
 impl ResponseError for AppError {
-    // Generate an HTTP response for each error type
-    fn error_response(&self) -> HttpResponse {
-        let status_code = self.status_code();
-        let error_response = ErrorResponse {
-            code: status_code.as_u16(),
-            message: self.to_string(),
-            error_type: format!("{:?}", self),
-        };
-        HttpResponse::build(status_code).json(error_response)
-    }
-
-    // Map AppError variants to HTTP status codes
     fn status_code(&self) -> StatusCode {
         match *self {
             AppError::InternalServerError => StatusCode::INTERNAL_SERVER_ERROR,
-            AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::Unauthorized => StatusCode::UNAUTHORIZED,
             AppError::RateLimitExceeded => StatusCode::TOO_MANY_REQUESTS,
+            AppError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR, // Add this line
         }
     }
 }

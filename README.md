@@ -25,7 +25,6 @@ src/
 │ ├── rate_test.rs
 │ └── user.rs
 ├── error.rs
-├── logger.rs
 └── main.rs
 ```
 

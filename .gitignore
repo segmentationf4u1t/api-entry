@@ -3,3 +3,5 @@
 Cargo.lock
 *.log
 .env
+app.log
+config.toml
