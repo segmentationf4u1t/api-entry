@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Configuration
-API_URL="http://localhost:8080/rate-test"  # Updated to use the new rate-test endpoint
-REQUESTS=100  # Total number of requests to send
-CONCURRENT=4  # Number of concurrent requests
+API_URL="http://localhost:8080/api/rate-test"  # Updated to use the new rate-test endpoint
+REQUESTS=100000  # Total number of requests to send
+CONCURRENT=1000  # Number of concurrent requests
 TIMEOUT=1  # Timeout for each request in seconds
 
 # Function to send a single request
