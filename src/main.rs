@@ -5,14 +5,18 @@ mod error;
 mod logger;
 mod middleware;
 mod routes;
-
+mod statistics;
+use actix_web::dev::Service;
 use actix_web::{App, HttpServer};
 use config::AppConfig;
 use db::establish_connection;
 use middleware::rate_limiter::RateLimiter;
 use log4rs;
 use actix_web::web;
-
+use statistics::Statistics;
+use std::sync::Arc;
+use tokio;
+use log::error;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Load application configuration from config file
@@ -35,13 +39,42 @@ async fn main() -> std::io::Result<()> {
     // Log server start information
     log::info!("Starting server at {}:{}", config.server.host, config.server.port);
 
+    let pool_clone = pool.clone();
+    let statistics = Arc::new(Statistics::new(pool.clone()));
+
+    // Create statistics table if it doesn't exist
+    if let Ok(client) = pool.get().await {
+        if let Err(e) = db::create_statistics_table(&client).await {
+            error!("Failed to create statistics table: {}", e);
+        }
+    }
+
+    // Start a background task to periodically save statistics
+    let stats_clone = Arc::clone(&statistics);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            stats_clone.save().await;
+        }
+    });
+
     // Create and run the HTTP server
     HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(pool.clone())) // Use web::Data::new() to wrap the pool
+            .app_data(web::Data::new(pool_clone.clone()))
+            .app_data(web::Data::new(Arc::clone(&statistics)))
             .wrap(rate_limiter.clone()) // Apply rate limiter middleware
+            .wrap_fn(|req, srv| {
+                let stats = req.app_data::<web::Data<Arc<Statistics>>>().unwrap().clone();
+                let path = req.path().to_string();
+                let fut = srv.call(req);
+                async move {
+                    let res = fut.await?;
+                    stats.increment(&format!("request_{}", path)).await;
+                    Ok(res)
+                }
+            })
             .configure(routes::config) // Configure routes
-            
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run()

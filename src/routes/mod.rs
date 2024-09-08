@@ -10,6 +10,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             .service(health::health_check)
             .service(rate_test::rate_test)
             .service(user::register)
-            .service(user::get_user)  // Add this line
+            .service(user::get_user)
+            .service(user::get_statistics)  // Add this line
     );
 }

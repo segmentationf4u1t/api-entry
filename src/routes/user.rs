@@ -5,6 +5,8 @@ use log::{error, info};
 use crate::auth;
 use crate::db;
 use crate::error::AppError;
+use crate::statistics::{Statistics, StatisticsData};
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct RegisterUser {
@@ -34,7 +36,10 @@ pub struct UserResponse {
 pub async fn register(
     pool: web::Data<Pool>,
     user: web::Json<RegisterUser>,
+    statistics: web::Data<Arc<Statistics>>,
 ) -> Result<HttpResponse, AppError> {
+    statistics.increment("register_requests").await;
+
     info!("Register function called with username: {}", user.username);
 
     let client = pool.get().await.map_err(|e| {
@@ -70,6 +75,7 @@ pub async fn register(
         token,
     };
 
+    statistics.increment("register_success").await;
     info!("User {} registered successfully", user.username);
     Ok(HttpResponse::Ok().json(response))
 }
@@ -78,7 +84,10 @@ pub async fn register(
 pub async fn get_user(
     pool: web::Data<Pool>,
     user_id: web::Path<i64>,
+    statistics: web::Data<Arc<Statistics>>,
 ) -> Result<HttpResponse, AppError> {
+    statistics.increment("get_user_requests").await;
+
     let user_id = user_id.into_inner();
     info!("Get user function called for user_id: {}", user_id);
 
@@ -102,6 +111,15 @@ pub async fn get_user(
         last_login: user.last_login,
     };
 
+    statistics.increment("get_user_success").await;
     info!("User {} retrieved successfully", user_id);
     Ok(HttpResponse::Ok().json(response))
+}
+
+#[get("/statistics")]
+pub async fn get_statistics(
+    statistics: web::Data<Arc<Statistics>>,
+) -> Result<HttpResponse, AppError> {
+    let stats: StatisticsData = statistics.get_statistics().await;
+    Ok(HttpResponse::Ok().json(stats))
 }

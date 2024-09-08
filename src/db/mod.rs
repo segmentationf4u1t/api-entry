@@ -6,7 +6,8 @@ use crate::error::AppError;
 use chrono::{DateTime, Utc, NaiveDateTime};
 use validator::validate_email;
 use serde_json::Value;
-
+use tokio_postgres::types::Json;
+use std::collections::HashMap;
 
 pub async fn user_exists(client: &Client, email: &str, username: &str) -> Result<bool, AppError> {
     let row = client
@@ -117,5 +118,29 @@ pub async fn update_last_login(client: &Client, user_id: i64) -> Result<(), toki
         "UPDATE users SET last_login = NOW() WHERE id = $1",
         &[&user_id],
     ).await?;
+    Ok(())
+}
+
+pub async fn create_statistics_table(client: &Client) -> Result<(), tokio_postgres::Error> {
+    client
+        .execute(
+            "CREATE TABLE IF NOT EXISTS api_statistics (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+                data JSONB NOT NULL
+            )",
+            &[],
+        )
+        .await?;
+    Ok(())
+}
+
+pub async fn insert_statistics(client: &Client, data: &HashMap<String, i64>) -> Result<(), tokio_postgres::Error> {
+    client
+        .execute(
+            "INSERT INTO api_statistics (timestamp, data) VALUES ($1, $2)",
+            &[&Utc::now(), &Json(data)],
+        )
+        .await?;
     Ok(())
 }
