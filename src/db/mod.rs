@@ -3,11 +3,10 @@ use tokio_postgres::NoTls;
 use crate::config::DatabaseConfig;
 use crate::auth::User;
 use crate::error::AppError;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, NaiveDateTime};
 use validator::validate_email;
 use serde_json::Value;
-use actix_web::Error;
-use actix_web::error::ErrorInternalServerError;
+
 
 pub async fn user_exists(client: &Client, email: &str, username: &str) -> Result<bool, AppError> {
     let row = client
@@ -91,23 +90,25 @@ pub async fn test_connection(pool: &Pool) -> Result<(), Box<dyn std::error::Erro
     }
 }
 
-pub async fn get_user_by_id(pool: &Pool, user_id: i32) -> Result<User, Error> {
-    let client = pool.get().await.map_err(ErrorInternalServerError)?;
+pub async fn get_user_by_id(client: &Client, user_id: i64) -> Result<User, AppError> {
     let row = client
-        .query_one("SELECT * FROM users WHERE id = $1", &[&user_id])
+        .query_one(
+            "SELECT id, username, email, created_at, avatar, status, last_login FROM users WHERE id = $1",
+            &[&user_id],
+        )
         .await
-        .map_err(ErrorInternalServerError)?;
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
     Ok(User {
-        id: row.get(0),
-        email: row.get(1),
-        username: row.get(2),
-        created_at: row.get(3),
-        avatar: row.get(4),
-        tokens: row.get(5),
-        status: row.get(6),
-        permissions: row.get(7),
-        last_login: row.get(8),
+        id: row.get("id"),
+        username: row.get("username"),
+        email: row.get("email"),
+        created_at: row.get("created_at"),
+        tokens: None,
+        permissions: None,
+        avatar: row.get("avatar"),
+        status: row.get("status"),
+        last_login: row.get("last_login"),
     })
 }
 

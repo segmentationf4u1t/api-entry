@@ -7,7 +7,7 @@ use serde_json::Value;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
-    pub id: i64, // or whatever type you're using for id
+    pub id: i64,
     pub email: String,
     pub username: String,
     pub created_at: DateTime<Utc>,

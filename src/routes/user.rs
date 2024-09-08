@@ -1,7 +1,7 @@
-use actix_web::{post, web, HttpResponse, Responder};
+use actix_web::{post, get, web, HttpResponse};
 use deadpool_postgres::Pool;
 use serde::{Deserialize, Serialize};
-use log::{error, info, warn};
+use log::{error, info};
 use crate::auth;
 use crate::db;
 use crate::error::AppError;
@@ -17,6 +17,17 @@ pub struct RegisterUser {
 pub struct RegisterResponse {
     message: String,
     token: String,
+}
+
+#[derive(Serialize)]
+pub struct UserResponse {
+    id: i64,
+    username: String,
+    email: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+    avatar: Option<String>,
+    status: String,
+    last_login: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[post("/register")]
@@ -60,5 +71,37 @@ pub async fn register(
     };
 
     info!("User {} registered successfully", user.username);
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[get("/user/{user_id}")]
+pub async fn get_user(
+    pool: web::Data<Pool>,
+    user_id: web::Path<i64>,
+) -> Result<HttpResponse, AppError> {
+    let user_id = user_id.into_inner();
+    info!("Get user function called for user_id: {}", user_id);
+
+    let client = pool.get().await.map_err(|e| {
+        error!("Failed to get database connection: {}", e);
+        AppError::DatabaseError(e.to_string())
+    })?;
+
+    let user = db::get_user_by_id(&client, user_id).await.map_err(|e| {
+        error!("Failed to get user with id {}: {}", user_id, e);
+        AppError::NotFound
+    })?;
+
+    let response = UserResponse {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        created_at: user.created_at,
+        avatar: user.avatar,
+        status: user.status,
+        last_login: user.last_login,
+    };
+
+    info!("User {} retrieved successfully", user_id);
     Ok(HttpResponse::Ok().json(response))
 }
