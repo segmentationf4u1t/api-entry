@@ -9,6 +9,17 @@ use serde_json::Value;
 use actix_web::Error;
 use actix_web::error::ErrorInternalServerError;
 
+pub async fn user_exists(client: &Client, email: &str, username: &str) -> Result<bool, AppError> {
+    let row = client
+        .query_one(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1 OR username = $2)",
+            &[&email, &username],
+        )
+        .await
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
+    Ok(row.get(0))
+}
 
 pub async fn insert_user(client: &Client, email: &str, username: &str, hashed_password: &str) -> Result<User, AppError> {
     // Validate email
@@ -24,6 +35,11 @@ pub async fn insert_user(client: &Client, email: &str, username: &str, hashed_pa
     // Validate hashed password length (assuming bcrypt, which is typically 60 characters)
     if hashed_password.len() != 60 {
         return Err(AppError::BadRequest("Invalid password hash".to_string()));
+    }
+
+    // Check if user already exists
+    if user_exists(client, email, username).await? {
+        return Err(AppError::BadRequest("User with this email or username already exists".to_string()));
     }
 
     // Proceed with insertion...

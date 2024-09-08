@@ -11,6 +11,7 @@ use config::AppConfig;
 use db::establish_connection;
 use middleware::rate_limiter::RateLimiter;
 use log4rs;
+use actix_web::web;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -37,9 +38,10 @@ async fn main() -> std::io::Result<()> {
     // Create and run the HTTP server
     HttpServer::new(move || {
         App::new()
-            .app_data(pool.clone()) // Add database pool to app data
+            .app_data(web::Data::new(pool.clone())) // Use web::Data::new() to wrap the pool
             .wrap(rate_limiter.clone()) // Apply rate limiter middleware
             .configure(routes::config) // Configure routes
+            
     })
     .bind((config.server.host.clone(), config.server.port))?
     .run()
