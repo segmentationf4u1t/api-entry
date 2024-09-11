@@ -1,10 +1,17 @@
 use actix_web::{get, web, HttpResponse, Responder};
 use crate::statistics::Statistics;
 use crate::error::AppError;
+use std::sync::Arc;
+use deadpool_postgres::Pool;
 
 #[get("/statistics")]
-async fn get_statistics(stats: web::Data<Statistics>) -> Result<impl Responder, AppError> {
-    let statistics = stats.get_statistics().await;
+async fn get_statistics(stats: web::Data<Arc<Statistics>>, pool: web::Data<Pool>) -> Result<impl Responder, AppError> {
+    let client = pool.get().await
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    
+    let statistics = stats.get_statistics(&client).await
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    
     Ok(HttpResponse::Ok().json(statistics))
 }
 

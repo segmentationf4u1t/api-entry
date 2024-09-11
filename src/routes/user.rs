@@ -91,15 +91,19 @@ pub async fn get_user(
     let user_id = user_id.into_inner();
     info!("Get user function called for user_id: {}", user_id);
 
+    // Replace the is_null() check with this:
     let client = pool.get().await.map_err(|e| {
         error!("Failed to get database connection: {}", e);
         AppError::DatabaseError(e.to_string())
     })?;
 
-    let user = db::get_user_by_id(&client, user_id).await.map_err(|e| {
-        error!("Failed to get user with id {}: {}", user_id, e);
-        AppError::NotFound
-    })?;
+    let user = match db::get_user_by_id(&client, user_id).await {
+        Ok(user) => user,
+        Err(e) => {
+            error!("Failed to get user with id {}: {}", user_id, e);
+            return Err(AppError::NotFound);
+        }
+    };
 
     let response = UserResponse {
         id: user.id,
@@ -108,6 +112,7 @@ pub async fn get_user(
         created_at: user.created_at,
         avatar: user.avatar,
         status: user.status,
+        
         last_login: user.last_login,
     };
 
@@ -119,7 +124,17 @@ pub async fn get_user(
 #[get("/statistics")]
 pub async fn get_statistics(
     statistics: web::Data<Arc<Statistics>>,
+    pool: web::Data<Pool>,
 ) -> Result<HttpResponse, AppError> {
-    let stats: StatisticsData = statistics.get_statistics().await;
+    let client = pool.get().await.map_err(|e| {
+        error!("Failed to get database connection: {}", e);
+        AppError::DatabaseError(e.to_string())
+    })?;
+
+    let stats = statistics.get_statistics(&client).await.map_err(|e| {
+        error!("Failed to get statistics: {}", e);
+        AppError::InternalServerError
+    })?;
+
     Ok(HttpResponse::Ok().json(stats))
 }

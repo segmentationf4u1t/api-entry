@@ -5,16 +5,28 @@ appenders:
     kind: file
     path: "logs/app.log"
     encoder:
-      pattern: "{d} - {l} - {m}{n}"
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} - {l} - {t} - {m}{n}"
+
+  stdout:
+    kind: console
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} - {h({l})} - {t} - {m}{n}"
 
 root:
-  level: info
+  level: trace
   appenders:
-    - file
+    - stdout
 
 loggers:
   my_actix_api:
     level: info
     appenders:
       - file
+    additive: false
+
+  # New logger for trace-level messages
+  trace_logger:
+    level: trace
+    appenders:
+      - stdout
     additive: false

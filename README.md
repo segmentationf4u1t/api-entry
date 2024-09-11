@@ -99,6 +99,7 @@ This project uses SQLx for database migrations. To create a new migration:
 To run migrations:
 
 ```
+sqlx migrate add <migration_name>
 sqlx migrate run
 ```
 
@@ -139,19 +140,6 @@ Logging is set up using `log4rs` and can be configured in the `log4rs.yaml` file
 - [ ] Add more advanced authentication features (login, logout, password reset)
 - [ ] Implement request validation using a crate like `validator`
 - [ ] Add API documentation using Swagger/OpenAPI
-
-## License
-
-This project is for personal use, however, if you find it useful, please feel free to use it.
-
-## Todo
-
-- [ ] Add authentication middleware
-- [ ] Implement more CRUD operations
-- [ ] Add unit and integration tests
-- [ ] Set up CI/CD pipeline
-- [ ] Add database migrations
-- [ ] Implement caching mechanism
 
 ## License
 

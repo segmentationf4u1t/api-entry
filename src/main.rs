@@ -2,7 +2,7 @@ mod auth;
 mod config;
 mod db;
 mod error;
-mod logger;
+pub mod logger;
 mod middleware;
 mod routes;
 mod statistics;
@@ -27,6 +27,9 @@ use chrono::Utc;
 use actix_cors::Cors;
 use actix_web::dev::ServiceResponse;
 use actix_web::dev::ServiceRequest;
+use actix_web::body::MessageBody;
+use actix_web::body::BoxBody; // Add this import
+use actix_web::body::EitherBody; // Add this import
 
 async fn init_database(pool: &Pool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = pool.get().await?;
@@ -56,7 +59,6 @@ async fn main() -> std::io::Result<()> {
     // Log server start information
     log::info!("Starting server at {}:{}", config.server.host, config.server.port);
 
-    let pool_clone = pool.clone();
     let statistics = Arc::new(Statistics::new());
 
     // Create statistics table if it doesn't exist
@@ -70,7 +72,7 @@ async fn main() -> std::io::Result<()> {
     let stats_clone = Arc::clone(&statistics);
     let pool_for_stats = pool.clone();
     tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(300)); // Save every 5 minutes
+        let mut interval = interval(Duration::from_secs(60)); // Save every 5 minutes
         loop {
             interval.tick().await;
             if let Err(e) = stats_clone.save(&pool_for_stats).await {
@@ -96,14 +98,15 @@ async fn main() -> std::io::Result<()> {
     // Create and run the HTTP server
     let pool_for_server = pool.clone();
     HttpServer::new(move || {
-        let stats = web::Data::new(Arc::clone(&statistics));
         let pool = pool_for_server.clone();
+        let stats = Arc::clone(&statistics);
+        
         App::new()
             .wrap(actix_web::middleware::Logger::default())
             .wrap(Cors::permissive())
             .wrap(rate_limiter.clone())
-            .wrap_fn(|req, srv| {
-                let stats = req.app_data::<web::Data<Arc<Statistics>>>().unwrap().clone();
+            .wrap_fn(move |req, srv| {
+                let stats = Arc::clone(&stats);
                 let start_time = Utc::now();
                 let req_method = req.method().clone();
                 let req_path = req.path().to_owned();
@@ -111,7 +114,7 @@ async fn main() -> std::io::Result<()> {
                     if let Ok(res) = &res {
                         let end_time = Utc::now();
                         let duration = (end_time - start_time).num_milliseconds() as f64;
-                        stats.get_ref().log_request(
+                        stats.log_request(
                             req_method.as_str(),
                             &req_path,
                             res.status().as_u16(),
@@ -121,8 +124,8 @@ async fn main() -> std::io::Result<()> {
                     res
                 })
             })
-            .app_data(pool.clone())
-            .app_data(stats.clone())
+            .app_data(web::Data::new(pool))
+            .app_data(web::Data::new(Arc::clone(&statistics)))
             .configure(routes::config)
             .configure(routes::statistics::config)
     })

@@ -1,16 +1,13 @@
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use std::collections::HashMap;
 use deadpool_postgres::Pool;
-use log::{error, info};
+use deadpool_postgres::Client;
 use crate::db;
 use serde::Serialize;
 use chrono::{DateTime, Utc};
 
-use crate::error::AppError;
-
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use tokio::sync::RwLock;
 
 #[derive(Clone, Serialize)]
 pub struct StatisticsData {
@@ -26,6 +23,7 @@ pub struct StatisticsData {
     pub register_success: usize,
     pub get_user_requests: usize,
     pub get_user_success: usize,
+    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Clone, Serialize)]
@@ -41,8 +39,6 @@ pub struct ErrorLog {
     pub message: String,
     pub timestamp: DateTime<Utc>,
 }
-
-use std::sync::RwLock;
 
 pub struct Statistics {
     data: RwLock<StatisticsData>,
@@ -69,6 +65,7 @@ impl Statistics {
                 register_success: 0,
                 get_user_requests: 0,
                 get_user_success: 0,
+                timestamp: Utc::now(),
             }),
             register_requests: AtomicUsize::new(0),
             register_success: AtomicUsize::new(0),
@@ -87,56 +84,49 @@ impl Statistics {
         };
     }
 
-    pub async fn get_statistics(&self) -> StatisticsData {
-        StatisticsData {
-            total_requests: (self.register_requests.load(Ordering::SeqCst) + self.get_user_requests.load(Ordering::SeqCst)) as i64,  // Cast to i64
-            avg_response_time: 0.0, // Implement actual calculation
-            error_rate: 1.0 - ((self.register_success.load(Ordering::SeqCst) + self.get_user_success.load(Ordering::SeqCst)) as f64 / 
-                               (self.register_requests.load(Ordering::SeqCst) + self.get_user_requests.load(Ordering::SeqCst)) as f64),
-            uptime: 0.0, // Implement actual uptime calculation
-            traffic_distribution: HashMap::new(), // Populate with actual data
-            last_requests: Vec::new(), // Populate with actual data
-            error_log: Vec::new(), // Populate with actual data
-            last_saved: None,
-            register_requests: self.register_requests.load(Ordering::SeqCst),
-            register_success: self.register_success.load(Ordering::SeqCst),
-            get_user_requests: self.get_user_requests.load(Ordering::SeqCst),
-            get_user_success: self.get_user_success.load(Ordering::SeqCst),
-        }
+    pub async fn get_statistics(&self, client: &Client) -> Result<StatisticsData, Box<dyn std::error::Error>> {
+        let db_stats = db::get_latest_statistics(client).await?;
+        let traffic_distribution = db::get_traffic_distribution(client).await?;
+        let last_requests = db::get_last_requests(client).await?;
+        let error_log = db::get_error_log(client).await?;
+
+        Ok(StatisticsData {
+            total_requests: db_stats.total_requests,
+            avg_response_time: db_stats.avg_response_time,
+            error_rate: db_stats.error_rate,
+            uptime: db_stats.uptime,
+            traffic_distribution,
+            last_requests,
+            error_log,
+            last_saved: Some(db_stats.timestamp),
+            register_requests: db_stats.register_requests as usize,
+            register_success: db_stats.register_success as usize,
+            get_user_requests: db_stats.get_user_requests as usize,
+            get_user_success: db_stats.get_user_success as usize,
+            timestamp: db_stats.timestamp,
+        })
     }
 
-    pub async fn save(&self, pool: &Pool) -> Result<(), Box<dyn std::error::Error>> {
-        let client = pool.get().await?;
-        let stats = self.get_statistics().await;
-        db::insert_statistics(&client, &stats).await?;
-        Ok(())
+    pub async fn save(&self, pool: &Pool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let data = self.data.read().await.clone();
+        save_statistics_to_db(pool, &data).await
     }
 
-    pub fn update_uptime(&self, uptime: f64) {
-        let mut data = self.data.write().unwrap();
+    pub async fn update_uptime(&self, uptime: f64) {
+        let mut data = self.data.write().await;
         data.uptime = uptime;
     }
 
-    pub fn log_request(&self, method: &str, path: &str, status: u16, duration: f64) {
-        let mut data = self.data.write().unwrap();
+    pub async fn log_request(&self, method: &str, path: &str, status: u16, duration: f64) {
+        let mut data = self.data.write().await;
         data.total_requests += 1;
-        data.avg_response_time = (data.avg_response_time * (data.total_requests - 1) as f64 + duration) / data.total_requests as f64;
-        
-        let key = format!("{}_{}", method, path);
-        *data.traffic_distribution.entry(key).or_insert(0) += 1;
-
-        data.last_requests.push(RequestLog {
-            method: method.to_string(),
-            endpoint: path.to_string(),
-            status,
-            timestamp: Utc::now(),
-        });
-
-        if status >= 400 {
-            data.error_log.push(ErrorLog {
-                message: format!("{} {} - {}", method, path, status),
-                timestamp: Utc::now(),
-            });
-        }
+        // Update other statistics as needed
+        // ...
     }
+}
+
+async fn save_statistics_to_db(pool: &Pool, data: &StatisticsData) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let client = pool.get().await?;
+    db::insert_statistics(&client, data).await?;
+    Ok(())
 }

@@ -8,6 +8,8 @@ use validator::validate_email;
 use serde_json::Value;
 use tokio_postgres::types::Json;
 use std::collections::HashMap;
+use crate::statistics::ErrorLog;
+use crate::statistics::RequestLog;
 
 pub async fn user_exists(client: &Client, email: &str, username: &str) -> Result<bool, AppError> {
     let row = client
@@ -217,6 +219,91 @@ pub async fn insert_statistics(client: &Client, data: &StatisticsData) -> Result
     }
 
     Ok(())
+}
+
+
+
+pub async fn get_latest_statistics(client: &Client) -> Result<StatisticsData, tokio_postgres::Error> {
+    let row = client
+        .query_one(
+            "SELECT * FROM api_statistics ORDER BY timestamp DESC LIMIT 1",
+            &[],
+        )
+        .await?;
+
+    Ok(StatisticsData {
+        total_requests: row.get("total_requests"),
+        avg_response_time: row.get("avg_response_time"),
+        error_rate: row.get("error_rate"),
+        uptime: row.get("uptime"),
+        register_requests: row.get::<_, i64>("register_requests") as usize,
+        register_success: row.get::<_, i64>("register_success") as usize,
+        get_user_requests: row.get::<_, i64>("get_user_requests") as usize,
+        get_user_success: row.get::<_, i64>("get_user_success") as usize,
+        timestamp: row.get("timestamp"),
+        traffic_distribution: HashMap::new(), // We'll populate this separately
+        last_requests: Vec::new(), // We'll populate this separately
+        error_log: Vec::new(), // We'll populate this separately
+        last_saved: None, // This will be set to the timestamp from the database
+    })
+}
+
+pub async fn get_traffic_distribution(client: &Client) -> Result<HashMap<String, u64>, tokio_postgres::Error> {
+    let rows = client
+        .query(
+            "SELECT route, SUM(count) as total FROM api_traffic_distribution GROUP BY route",
+            &[],
+        )
+        .await?;
+
+    let mut distribution = HashMap::new();
+    for row in rows {
+        let route: String = row.get("route");
+        let count: i64 = row.get("total");
+        distribution.insert(route, count as u64);
+    }
+
+    Ok(distribution)
+}
+
+pub async fn get_last_requests(client: &Client) -> Result<Vec<RequestLog>, tokio_postgres::Error> {
+    let rows = client
+        .query(
+            "SELECT * FROM api_request_log ORDER BY timestamp DESC LIMIT 10",
+            &[],
+        )
+        .await?;
+
+    let requests = rows
+        .into_iter()
+        .map(|row| RequestLog {
+            method: row.get("method"),
+            endpoint: row.get("endpoint"),
+            status: row.get::<_, i16>("status") as u16,
+            timestamp: row.get("timestamp"),
+        })
+        .collect();
+
+    Ok(requests)
+}
+
+pub async fn get_error_log(client: &Client) -> Result<Vec<ErrorLog>, tokio_postgres::Error> {
+    let rows = client
+        .query(
+            "SELECT * FROM api_error_log ORDER BY timestamp DESC LIMIT 10",
+            &[],
+        )
+        .await?;
+
+    let errors = rows
+        .into_iter()
+        .map(|row| ErrorLog {
+            message: row.get("message"),
+            timestamp: row.get("timestamp"),
+        })
+        .collect();
+
+    Ok(errors)
 }
 
 
