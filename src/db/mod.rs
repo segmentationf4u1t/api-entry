@@ -1,6 +1,6 @@
 use deadpool_postgres::{Config, Pool, Runtime, Client};
 use tokio_postgres::NoTls;
-use crate::config::DatabaseConfig;
+use crate::{config::DatabaseConfig, statistics::StatisticsData};
 use crate::auth::User;
 use crate::error::AppError;
 use chrono::{DateTime, Utc, NaiveDateTime};
@@ -121,26 +121,104 @@ pub async fn update_last_login(client: &Client, user_id: i64) -> Result<(), toki
     Ok(())
 }
 
-pub async fn create_statistics_table(client: &Client) -> Result<(), tokio_postgres::Error> {
+pub async fn create_statistics_tables(client: &Client) -> Result<(), tokio_postgres::Error> {
     client
-        .execute(
-            "CREATE TABLE IF NOT EXISTS api_statistics (
-                id SERIAL PRIMARY KEY,
+        .batch_execute(
+            "
+            CREATE TABLE IF NOT EXISTS api_statistics (
+                id BIGSERIAL PRIMARY KEY,
                 timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-                data JSONB NOT NULL
-            )",
-            &[],
+                total_requests BIGINT NOT NULL,
+                avg_response_time DOUBLE PRECISION NOT NULL,
+                error_rate DOUBLE PRECISION NOT NULL,
+                uptime DOUBLE PRECISION NOT NULL,
+                register_requests BIGINT NOT NULL,
+                register_success BIGINT NOT NULL,
+                get_user_requests BIGINT NOT NULL,
+                get_user_success BIGINT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS api_traffic_distribution (
+                id BIGSERIAL PRIMARY KEY,
+                timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+                route TEXT NOT NULL,
+                count BIGINT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS api_request_log (
+                id BIGSERIAL PRIMARY KEY,
+                timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+                method TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                status SMALLINT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS api_error_log (
+                id BIGSERIAL PRIMARY KEY,
+                timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+                message TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_api_statistics_timestamp ON api_statistics(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_api_traffic_distribution_timestamp ON api_traffic_distribution(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_api_request_log_timestamp ON api_request_log(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_api_error_log_timestamp ON api_error_log(timestamp);
+            "
         )
         .await?;
     Ok(())
 }
 
-pub async fn insert_statistics(client: &Client, data: &HashMap<String, i64>) -> Result<(), tokio_postgres::Error> {
+pub async fn insert_statistics(client: &Client, data: &StatisticsData) -> Result<(), tokio_postgres::Error> {
+    let timestamp = Utc::now();
+
+    // Insert main statistics
     client
         .execute(
-            "INSERT INTO api_statistics (timestamp, data) VALUES ($1, $2)",
-            &[&Utc::now(), &Json(data)],
+            "INSERT INTO api_statistics (timestamp, total_requests, avg_response_time, error_rate, uptime, register_requests, register_success, get_user_requests, get_user_success)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            &[&timestamp, &data.total_requests, &data.avg_response_time, &data.error_rate, &data.uptime, 
+              &(data.register_requests as i64), &(data.register_success as i64), 
+              &(data.get_user_requests as i64), &(data.get_user_success as i64)],
         )
         .await?;
+
+    // Insert traffic distribution
+    for (route, count) in &data.traffic_distribution {
+        client
+            .execute(
+                "INSERT INTO api_traffic_distribution (timestamp, route, count)
+                 VALUES ($1, $2, $3)",
+                &[&timestamp, route, &(*count as i64)],
+            )
+            .await?;
+    }
+
+    // Insert last requests
+    for request in &data.last_requests {
+        client
+            .execute(
+                "INSERT INTO api_request_log (timestamp, method, endpoint, status)
+                 VALUES ($1, $2, $3, $4)",
+                &[&request.timestamp, &request.method, &request.endpoint, &(request.status as i16)],
+            )
+            .await?;
+    }
+
+    // Insert error log
+    for error in &data.error_log {
+        client
+            .execute(
+                "INSERT INTO api_error_log (timestamp, message)
+                 VALUES ($1, $2)",
+                &[&error.timestamp, &error.message],
+            )
+            .await?;
+    }
+
     Ok(())
 }
+
+
+
+

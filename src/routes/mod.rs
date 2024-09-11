@@ -3,6 +3,7 @@ use actix_web::web;
 mod health;
 mod rate_test;
 mod user;
+pub(crate) mod statistics;
 
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -11,6 +12,6 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             .service(rate_test::rate_test)
             .service(user::register)
             .service(user::get_user)
-            .service(user::get_statistics)  // Add this line
+            .configure(statistics::config)
     );
 }

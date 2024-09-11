@@ -38,7 +38,7 @@ pub async fn register(
     user: web::Json<RegisterUser>,
     statistics: web::Data<Arc<Statistics>>,
 ) -> Result<HttpResponse, AppError> {
-    statistics.increment("register_requests").await;
+    statistics.as_ref().increment("register_requests").await;
 
     info!("Register function called with username: {}", user.username);
 
@@ -75,7 +75,7 @@ pub async fn register(
         token,
     };
 
-    statistics.increment("register_success").await;
+    statistics.as_ref().increment("register_success").await;
     info!("User {} registered successfully", user.username);
     Ok(HttpResponse::Ok().json(response))
 }
@@ -86,7 +86,7 @@ pub async fn get_user(
     user_id: web::Path<i64>,
     statistics: web::Data<Arc<Statistics>>,
 ) -> Result<HttpResponse, AppError> {
-    statistics.increment("get_user_requests").await;
+    statistics.as_ref().increment("get_user_requests").await;
 
     let user_id = user_id.into_inner();
     info!("Get user function called for user_id: {}", user_id);
@@ -111,7 +111,7 @@ pub async fn get_user(
         last_login: user.last_login,
     };
 
-    statistics.increment("get_user_success").await;
+    statistics.as_ref().increment("get_user_success").await;
     info!("User {} retrieved successfully", user_id);
     Ok(HttpResponse::Ok().json(response))
 }

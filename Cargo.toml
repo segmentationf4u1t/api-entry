@@ -20,7 +20,9 @@ tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_j
 deadpool-postgres = "0.10"
 bcrypt = "0.15.1"
 jsonwebtoken = "9.3.0"
+sys-info = "0.9"
 config = "0.14.0"
 validator = "0.16"
 postgres-types = { version = "0.2", features = ["derive"] }
 tokio = { version = "1.0", features = ["full"] }
+actix-cors = "0.7.0"
