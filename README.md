@@ -42,7 +42,13 @@ src/
 
    Edit `config.toml` with your specific settings.
 
-5. Run the project:
+5. Run database migrations:
+
+   ```
+   sqlx migrate run
+   ```
+
+6. Run the project:
 
    ```
    cargo run
@@ -55,6 +61,9 @@ The server will start on the host and port specified in your `config.toml`.
 - `GET /api/health`: Health check endpoint
 - `GET /api/rate-test`: Rate limiting test endpoint
 - `POST /api/register`: User registration endpoint
+- `GET /api/user/{user_id}`: Get user information
+- `GET /api/statistics`: Get API usage statistics
+- `GET /api/system_health`: Get system health information
 
 ## Configuration
 
