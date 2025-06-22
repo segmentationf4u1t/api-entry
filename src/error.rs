@@ -1,4 +1,4 @@
-use actix_web::{http::StatusCode, HttpResponse, ResponseError};
+use actix_web::{http::StatusCode, ResponseError}; // Removed HttpResponse
 use serde::Serialize;
 use std::fmt;
 use thiserror::Error;
@@ -56,5 +56,62 @@ impl fmt::Display for ErrorResponse {
             "{{ \"code\": {}, \"message\": \"{}\", \"error_type\": \"{}\" }}",
             self.code, self.message, self.error_type
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::http::StatusCode;
+
+    // Test the status_code method for each AppError variant
+    #[test]
+    fn test_app_error_status_codes() {
+        assert_eq!(AppError::InternalServerError.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(AppError::NotFound.status_code(), StatusCode::NOT_FOUND);
+        assert_eq!(AppError::BadRequest("test".to_string()).status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(AppError::Unauthorized.status_code(), StatusCode::UNAUTHORIZED);
+        assert_eq!(AppError::RateLimitExceeded.status_code(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(AppError::DatabaseError("db issue".to_string()).status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // Test the Display trait implementation (derived by thiserror) for AppError
+    #[test]
+    fn test_app_error_display() {
+        assert_eq!(AppError::InternalServerError.to_string(), "Internal Server Error");
+        assert_eq!(AppError::NotFound.to_string(), "Not Found");
+        assert_eq!(AppError::BadRequest("test message".to_string()).to_string(), "Bad Request: test message");
+        assert_eq!(AppError::Unauthorized.to_string(), "Unauthorized");
+        assert_eq!(AppError::RateLimitExceeded.to_string(), "Rate Limit Exceeded");
+        assert_eq!(AppError::DatabaseError("connection failed".to_string()).to_string(), "Database error: connection failed");
+    }
+
+    // Test the Display trait implementation for ErrorResponse
+    #[test]
+    fn test_error_response_display() {
+        let error_response = ErrorResponse {
+            code: 404,
+            message: "Resource not found".to_string(),
+            error_type: "NotFound".to_string(),
+        };
+        assert_eq!(
+            error_response.to_string(),
+            r#"{ "code": 404, "message": "Resource not found", "error_type": "NotFound" }"#
+        );
+    }
+
+    // Test that ErrorResponse can be serialized (implicitly tested by its usage in handlers, but good to have a direct test)
+    #[test]
+    fn test_error_response_serialization() {
+        let error_response = ErrorResponse {
+            code: 500,
+            message: "Server issue".to_string(),
+            error_type: "InternalServerError".to_string(),
+        };
+        let serialized = serde_json::to_string(&error_response).unwrap();
+        // Basic check, could be more specific if needed
+        assert!(serialized.contains("\"code\":500"));
+        assert!(serialized.contains("\"message\":\"Server issue\""));
+        assert!(serialized.contains("\"error_type\":\"InternalServerError\""));
     }
 }

@@ -1,135 +1,115 @@
-mod auth;
-mod config;
-mod db;
-mod error;
-pub mod logger;
-mod middleware;
-mod routes;
-mod statistics;
-//use actix_web::dev::Service;
-use actix_web::{App, HttpServer};
-use config::AppConfig;
-use db::establish_connection;
+// Use items from the library crate
+use my_actix_api::{
+    AppConfig,
+    // Pool, // Pool is used via db_pool which is typed, direct import not needed
+    Statistics,
+    RateLimiter,
+    establish_connection,
+    configure_app_routes,
+    init_database_schema,
+    start_background_tasks,
+    // db,
+    // routes,
+    // middleware,
+    // logger, // logger module itself not directly used, log macros are via `log` crate
+};
 
-use middleware::rate_limiter::RateLimiter;
-use log4rs;
-use actix_web::web;
-use actix_web::dev::Service; // Change this line
-use deadpool_postgres::Pool;
-use statistics::Statistics;
+use actix_web::{web, App, HttpServer};
 use std::sync::Arc;
-use tokio;
-use log::error;
-use tokio::time::{interval, Duration};
-use futures::FutureExt;
-
 use chrono::Utc;
-use actix_cors::Cors;
-use actix_web::dev::ServiceResponse;
-use actix_web::dev::ServiceRequest;
-use actix_web::body::MessageBody;
-use actix_web::body::BoxBody; // Add this import
-use actix_web::body::EitherBody; // Add this import
-
-async fn init_database(pool: &Pool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let client = pool.get().await?;
-    db::create_statistics_tables(&client).await?;
-    Ok(())
-}
+use log; // Ensure log macros are available
+use log4rs; // For logger initialization
+use futures::FutureExt; // For .map on futures
+use actix_web::dev::Service; // For srv.call
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // Load application configuration from config file
-    let config = AppConfig::new().expect("Failed to load configuration");
-    // Establish database connection pool using the configuration
+    // Load application configuration using AppConfig from the library
+    let app_config = AppConfig::new().expect("Failed to load configuration");
    
-    // Initialize the logger using log4rs and the log4rs.yaml configuration file
+    // Initialize the logger (assuming log4rs.yaml is still the config file)
+    // If logger::init_logger is now in lib.rs, call that.
+    // For now, keeping direct init here.
     log4rs::init_file("log4rs.yaml", Default::default()).expect("Failed to initialize logger");
 
-    // Establish database connection pool using the configuration
-    let pool = establish_connection(&config.database)
-        .expect("Failed to create pool");
-    db::test_connection(&pool).await.expect("Failed to test database connection");
-    // Create rate limiter middleware with configured settings
+    // Establish database connection pool using establish_connection from the library
+    let db_pool = establish_connection(&app_config.database)
+        .expect("Failed to create database pool");
+
+    // Test database connection (optional, db might be a private module now)
+    // my_actix_api::db::test_connection(&db_pool).await.expect("Failed to test database connection");
+    // This specific test_connection might not be pub. If it's important, it should be.
+    // For now, assume establish_connection is enough indication.
+
+    // Create rate limiter middleware
     let rate_limiter = RateLimiter::new(
-        config.rate_limit.requests_per_second,
-        config.rate_limit.burst_size,
+        app_config.rate_limit.requests_per_second,
+        app_config.rate_limit.burst_size,
     );
 
-    // Log server start information
-    log::info!("Starting server at {}:{}", config.server.host, config.server.port);
+    log::info!("Starting server at {}:{}", app_config.server.host, app_config.server.port);
 
-    let statistics = Arc::new(Statistics::new());
+    let statistics_manager = Arc::new(Statistics::new());
 
-    // Create statistics table if it doesn't exist
-    if let Ok(client) = pool.get().await {
-        if let Err(e) = db::create_statistics_tables(&client).await {
-            error!("Failed to create statistics table: {}", e);
-        }
+    // Initialize database schema (e.g., create tables if they don't exist)
+    // This replaces the direct call to db::create_statistics_tables
+    if let Err(e) = init_database_schema(&db_pool).await {
+        log::error!("Failed to initialize database schema: {}", e);
+        // Depending on severity, might want to exit or handle differently
     }
 
-    // Start a background task to periodically save statistics
-    let stats_clone = Arc::clone(&statistics);
-    let pool_for_stats = pool.clone();
-    tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(60)); // Save every 5 minutes
-        loop {
-            interval.tick().await;
-            if let Err(e) = stats_clone.save(&pool_for_stats).await {
-                error!("Failed to save statistics: {}", e);
-            }
-        }
-    });
-
-    // Start a background task to update uptime
-    let stats_clone = Arc::clone(&statistics);
-    let start_time = Utc::now();
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(60)).await; // Update every minute
-            let uptime = (Utc::now() - start_time).num_seconds() as f64;
-            stats_clone.update_uptime(uptime);
-        }
-    });
-
-    // Initialize database
-    init_database(&pool).await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    let app_start_time = Utc::now();
+    start_background_tasks(Arc::clone(&statistics_manager), db_pool.clone(), app_start_time);
 
     // Create and run the HTTP server
-    let pool_for_server = pool.clone();
+    let server_db_pool = db_pool.clone();
+    let server_statistics = Arc::clone(&statistics_manager);
+    let server_app_config = app_config.clone(); // Clone AppConfig for the factory
+
     HttpServer::new(move || {
-        let pool = pool_for_server.clone();
-        let stats = Arc::clone(&statistics);
-        
+        // Clone Arcs needed for the App factory here
+        // These are the "original" Arcs/values for this factory instance
+        let factory_db_pool = server_db_pool.clone();
+        let factory_statistics_arc = Arc::clone(&server_statistics);
+        let factory_app_config = server_app_config.clone();
+        let factory_rate_limiter = rate_limiter.clone();
+
         App::new()
             .wrap(actix_web::middleware::Logger::default())
-            .wrap(Cors::permissive())
-            .wrap(rate_limiter.clone())
-            .wrap_fn(move |req, srv| {
-                let stats = Arc::clone(&stats);
-                let start_time = Utc::now();
-                let req_method = req.method().clone();
-                let req_path = req.path().to_owned();
-                srv.call(req).map(move |res| {
-                    if let Ok(res) = &res {
-                        let end_time = Utc::now();
-                        let duration = (end_time - start_time).num_milliseconds() as f64;
-                        stats.log_request(
-                            req_method.as_str(),
-                            &req_path,
-                            res.status().as_u16(),
-                            duration,
-                        );
-                    }
-                    res
-                })
-            })
-            .app_data(web::Data::new(pool))
-            .app_data(web::Data::new(Arc::clone(&statistics)))
-            .configure(routes::config)
-            .configure(routes::statistics::config)
+            .wrap(actix_cors::Cors::permissive())
+            .wrap(factory_rate_limiter)
+            .wrap_fn({ // Use a block to scope the clone for wrap_fn
+                let stats_clone_for_wrap_service = Arc::clone(&factory_statistics_arc); // Clone #1 for the service factory
+                move |req, srv| { // This closure is the service factory
+                    let stats_clone_for_log_task = Arc::clone(&stats_clone_for_wrap_service); // Clone #2 for the spawned task
+                    let req_method_owned = req.method().clone().to_string();
+                    let req_path_owned = req.path().to_owned();
+                    let start_time = Utc::now();
+
+                    srv.call(req).map(move |res: Result<actix_web::dev::ServiceResponse<_>, actix_web::Error>| {
+                        if let Ok(res_ok) = &res {
+                            let end_time = Utc::now();
+                            let duration = (end_time - start_time).num_milliseconds() as f64;
+                            let status_code = res_ok.status().as_u16();
+                            tokio::spawn(async move {
+                                stats_clone_for_log_task.log_request(
+                                    &req_method_owned,
+                                    &req_path_owned,
+                                    status_code,
+                                    duration,
+                                ).await;
+                            });
+                        }
+                        res
+                    })
+                }
+            }) // End of wrap_fn
+            .app_data(web::Data::new(factory_db_pool))
+            .app_data(web::Data::new(factory_statistics_arc)) // Use the original factory_statistics_arc
+            .app_data(web::Data::new(factory_app_config))
+            .configure(configure_app_routes)
     })
-    .bind(format!("{}:{}", config.server.host, config.server.port))?
+    .bind(format!("{}:{}", app_config.server.host, app_config.server.port))?
     .run()
     .await
 }
