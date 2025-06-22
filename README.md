@@ -103,7 +103,6 @@ sqlx migrate add <migration_name>
 sqlx migrate run
 ```
 
-
 ## Statistics and Monitoring
 
 The API includes endpoints for monitoring its performance and usage:
@@ -134,7 +133,7 @@ Logging is set up using `log4rs` and can be configured in the `log4rs.yaml` file
 ## Todo
 
 - [ ] Implement more CRUD operations
-- [ ] Add unit and integration tests
+- [ ✓ ] Add unit and integration tests
 - [ ] Set up CI/CD pipeline
 - [ ] Implement caching mechanism
 - [ ] Add more advanced authentication features (login, logout, password reset)
