@@ -3,13 +3,31 @@ use tokio_postgres::NoTls;
 use crate::{config::DatabaseConfig, statistics::StatisticsData};
 use crate::auth::User;
 use crate::error::AppError;
-use chrono::{DateTime, Utc, NaiveDateTime};
+use chrono::{DateTime, Utc}; // Removed NaiveDateTime
 use validator::validate_email;
 use serde_json::Value;
-use tokio_postgres::types::Json;
+// Removed: use tokio_postgres::types::Json;
 use std::collections::HashMap;
 use crate::statistics::ErrorLog;
 use crate::statistics::RequestLog;
+
+// Helper function for input validation, can be unit tested easily
+fn validate_new_user_input(email: &str, username: &str, hashed_password: &str) -> Result<(), AppError> {
+    if !validate_email(email) {
+        return Err(AppError::BadRequest("Invalid email format".to_string()));
+    }
+
+    // Validate username (example: alphanumeric, 3-20 characters)
+    if !username.chars().all(|c| c.is_alphanumeric()) || username.len() < 3 || username.len() > 20 {
+        return Err(AppError::BadRequest("Invalid username format".to_string()));
+    }
+
+    // Validate hashed password length (assuming bcrypt, which is typically 60 characters)
+    if hashed_password.len() != 60 {
+        return Err(AppError::BadRequest("Invalid password hash".to_string()));
+    }
+    Ok(())
+}
 
 pub async fn user_exists(client: &Client, email: &str, username: &str) -> Result<bool, AppError> {
     let row = client
@@ -24,20 +42,8 @@ pub async fn user_exists(client: &Client, email: &str, username: &str) -> Result
 }
 
 pub async fn insert_user(client: &Client, email: &str, username: &str, hashed_password: &str) -> Result<User, AppError> {
-    // Validate email
-    if !validate_email(email) {
-        return Err(AppError::BadRequest("Invalid email format".to_string()));
-    }
-
-    // Validate username (example: alphanumeric, 3-20 characters)
-    if !username.chars().all(|c| c.is_alphanumeric()) || username.len() < 3 || username.len() > 20 {
-        return Err(AppError::BadRequest("Invalid username format".to_string()));
-    }
-
-    // Validate hashed password length (assuming bcrypt, which is typically 60 characters)
-    if hashed_password.len() != 60 {
-        return Err(AppError::BadRequest("Invalid password hash".to_string()));
-    }
+    // Use the refactored validation function
+    validate_new_user_input(email, username, hashed_password)?;
 
     // Check if user already exists
     if user_exists(client, email, username).await? {
@@ -306,6 +312,112 @@ pub async fn get_error_log(client: &Client) -> Result<Vec<ErrorLog>, tokio_postg
     Ok(errors)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // We don't need a real client for testing validate_new_user_input
+
+    #[test]
+    fn test_validate_new_user_input_valid() {
+        let result = validate_new_user_input(
+            "test@example.com",
+            "validuser",
+            "valid_bcrypt_hash_string_of_exactly_60_characters_long_abcXY", // Now 60 chars
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_new_user_input_invalid_email() {
+        let result = validate_new_user_input(
+            "invalid-email",
+            "validuser",
+            "valid_bcrypt_hash_string_of_exactly_60_characters_long_abc",
+        );
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::BadRequest(msg) => assert_eq!(msg, "Invalid email format"),
+            _ => panic!("Expected BadRequest for invalid email"),
+        }
+    }
+
+    #[test]
+    fn test_validate_new_user_input_username_too_short() {
+        let result = validate_new_user_input(
+            "test@example.com",
+            "ab", // Too short
+            "valid_bcrypt_hash_string_of_exactly_60_characters_long_abc",
+        );
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::BadRequest(msg) => assert_eq!(msg, "Invalid username format"),
+            _ => panic!("Expected BadRequest for short username"),
+        }
+    }
+
+    #[test]
+    fn test_validate_new_user_input_username_too_long() {
+        let result = validate_new_user_input(
+            "test@example.com",
+            "thisusernameiswaytoolongandshouldfailvalidation", // Too long
+            "valid_bcrypt_hash_string_of_exactly_60_characters_long_abc",
+        );
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::BadRequest(msg) => assert_eq!(msg, "Invalid username format"),
+            _ => panic!("Expected BadRequest for long username"),
+        }
+    }
+
+    #[test]
+    fn test_validate_new_user_input_username_invalid_chars() {
+        let result = validate_new_user_input(
+            "test@example.com",
+            "user name with spaces", // Invalid chars
+            "valid_bcrypt_hash_string_of_exactly_60_characters_long_abc",
+        );
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::BadRequest(msg) => assert_eq!(msg, "Invalid username format"),
+            _ => panic!("Expected BadRequest for username with invalid chars"),
+        }
+    }
+
+    #[test]
+    fn test_validate_new_user_input_password_hash_too_short() {
+        let result = validate_new_user_input(
+            "test@example.com",
+            "validuser",
+            "short_hash", // Too short
+        );
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::BadRequest(msg) => assert_eq!(msg, "Invalid password hash"),
+            _ => panic!("Expected BadRequest for short password hash"),
+        }
+    }
+
+    #[test]
+    fn test_validate_new_user_input_password_hash_too_long() {
+        let result = validate_new_user_input(
+            "test@example.com",
+            "validuser",
+            "this_is_a_very_long_password_hash_that_is_definitely_over_60_characters", // Too long
+        );
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::BadRequest(msg) => assert_eq!(msg, "Invalid password hash"),
+            _ => panic!("Expected BadRequest for long password hash"),
+        }
+    }
+
+    // The function `establish_connection` could be tested if we could mock `Config::create_pool`
+    // or by trying to connect to a dummy/non-existent DB and checking the error type,
+    // but that leans more towards integration testing or requires more setup.
+
+    // Other functions like user_exists, get_user_by_id, etc., are heavily DB-dependent
+    // and are better suited for integration tests using the test DB helper.
+}
 
 
 

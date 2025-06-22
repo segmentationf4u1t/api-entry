@@ -3,6 +3,9 @@ name = "my_actix_api"
 version = "0.1.0"
 edition = "2021"
 
+[dev-dependencies]
+reqwest = { version = "0.11", features = ["json"] }
+
 [dependencies]
 actix-web = "4.3.1"
 serde = { version = "1.0.210", features = ["derive"] }
@@ -12,7 +15,7 @@ env_logger = "0.10"
 chrono = {version = "0.4", features = ["serde"]}
 thiserror = "1.0"
 backtrace = "0.3"
-governor = { version = "0.6", features = ["dashmap"] }
+governor = { version = "0.6", features = ["dashmap"] } # Reverted to only necessary features
 nonzero_ext = "0.3"
 futures = "0.3"
 log4rs = "1.3"

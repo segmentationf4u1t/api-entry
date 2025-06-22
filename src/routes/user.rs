@@ -5,7 +5,7 @@ use log::{error, info};
 use crate::auth;
 use crate::db;
 use crate::error::AppError;
-use crate::statistics::{Statistics, StatisticsData};
+use crate::statistics::Statistics; // Removed StatisticsData
 use std::sync::Arc;
 
 #[derive(Deserialize)]

@@ -117,11 +117,14 @@ impl Statistics {
         data.uptime = uptime;
     }
 
-    pub async fn log_request(&self, method: &str, path: &str, status: u16, duration: f64) {
+    pub async fn log_request(&self, _method: &str, _path: &str, _status: u16, _duration: f64) {
         let mut data = self.data.write().await;
         data.total_requests += 1;
         // Update other statistics as needed
-        // ...
+        // For example, add to last_requests deque, update traffic_distribution, avg_response_time etc.
+        // data.last_requests.push_back(RequestLog { method: _method.to_string(), endpoint: _path.to_string(), status: _status, timestamp: Utc::now() });
+        // if data.last_requests.len() > SOME_LIMIT { data.last_requests.pop_front(); }
+        // *data.traffic_distribution.entry(_path.to_string()).or_insert(0) += 1;
     }
 }
 
@@ -129,4 +132,84 @@ async fn save_statistics_to_db(pool: &Pool, data: &StatisticsData) -> Result<(),
     let client = pool.get().await?;
     db::insert_statistics(&client, data).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn test_statistics_new() {
+        let stats = Statistics::new();
+        assert_eq!(stats.register_requests.load(Ordering::SeqCst), 0);
+        assert_eq!(stats.register_success.load(Ordering::SeqCst), 0);
+        assert_eq!(stats.get_user_requests.load(Ordering::SeqCst), 0);
+        assert_eq!(stats.get_user_success.load(Ordering::SeqCst), 0);
+
+        let data = stats.data.read().await;
+        assert_eq!(data.total_requests, 0);
+        assert_eq!(data.uptime, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_statistics_increment() {
+        let stats = Statistics::new();
+
+        stats.increment("register_requests").await;
+        assert_eq!(stats.register_requests.load(Ordering::SeqCst), 1);
+
+        stats.increment("register_success").await;
+        assert_eq!(stats.register_success.load(Ordering::SeqCst), 1);
+
+        stats.increment("get_user_requests").await;
+        assert_eq!(stats.get_user_requests.load(Ordering::SeqCst), 1);
+
+        stats.increment("get_user_success").await;
+        assert_eq!(stats.get_user_success.load(Ordering::SeqCst), 1);
+
+        // Test unknown key
+        stats.increment("unknown_key").await;
+        assert_eq!(stats.register_requests.load(Ordering::SeqCst), 1); // Should not change others
+        assert_eq!(stats.get_user_success.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_update_uptime() {
+        let stats = Statistics::new();
+        let new_uptime = 99.95;
+        stats.update_uptime(new_uptime).await;
+
+        let data = stats.data.read().await;
+        assert_eq!(data.uptime, new_uptime);
+    }
+
+    #[tokio::test]
+    async fn test_log_request() {
+        let stats = Statistics::new();
+
+        let initial_total_requests = stats.data.read().await.total_requests;
+        assert_eq!(initial_total_requests, 0);
+
+        stats.log_request("GET", "/test", 200, 0.123).await;
+
+        let data_after_log = stats.data.read().await;
+        assert_eq!(data_after_log.total_requests, initial_total_requests + 1);
+
+        // If other fields in StatisticsData were updated by log_request, they would be tested here.
+        // For example, if avg_response_time was calculated:
+        // assert_ne!(data_after_log.avg_response_time, 0.0);
+    }
+
+    // Unit tests for `get_statistics` and `save` would require mocking database interactions.
+    // These are better covered by integration tests or tests with a real test database.
+    // For example, a test for `save_statistics_to_db` would look like this if we had db mocking:
+    //
+    // use crate::tests::helpers::test_helpers; // Assuming setup_test_db is available
+    // use crate::db; // For mockable db functions
+    //
+    // #[tokio::test]
+    // async fn test_save_statistics_to_db_mocked() {
+    //     // Mock setup for db::insert_statistics
+    // }
 }

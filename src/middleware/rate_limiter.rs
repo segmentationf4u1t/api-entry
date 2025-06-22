@@ -62,6 +62,107 @@ where
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use governor::clock::DefaultClock; // Using DefaultClock
+    use governor::state::keyed::DashMapStateStore;
+    use std::time::Duration;
+    use std::num::NonZeroU32;
+    use tokio::time::sleep; // For async sleep
+
+    // Type alias for the specific keyed rate limiter we're testing
+    type KeyedLimiter = GovernorRateLimiter<String, DashMapStateStore<String>, DefaultClock>;
+
+    #[test]
+    fn test_rate_limiter_default_creation() {
+        let _limiter = RateLimiter::default();
+        assert!(true, "Default creation should not panic");
+    }
+
+    #[test]
+    fn test_rate_limiter_new_creation() {
+        let _limiter = RateLimiter::new(5, 10);
+        assert!(true, "New creation should not panic");
+    }
+
+    #[tokio::test] // Marked as async
+    async fn test_rate_limiter_behavior_allows_and_blocks() {
+        let quota = Quota::per_second(NonZeroU32::new(1).unwrap()).allow_burst(NonZeroU32::new(1).unwrap());
+        let clock = DefaultClock::default();
+        let governor_limiter = KeyedLimiter::new(quota, DashMapStateStore::default(), &clock);
+        let limiter_arc = Arc::new(governor_limiter);
+
+        let ip_key = "127.0.0.1".to_string();
+
+        assert!(limiter_arc.check_key(&ip_key).is_ok(), "First request should be allowed");
+        assert!(limiter_arc.check_key(&ip_key).is_err(), "Second request should be blocked");
+
+        sleep(Duration::from_secs(1)).await; // Use tokio::time::sleep
+        assert!(limiter_arc.check_key(&ip_key).is_ok(), "Third request after waiting should be allowed");
+        assert!(limiter_arc.check_key(&ip_key).is_err(), "Fourth request should be blocked again");
+    }
+
+    #[tokio::test] // Marked as async
+    async fn test_rate_limiter_burst_behavior() {
+        let quota = Quota::per_second(NonZeroU32::new(2).unwrap()).allow_burst(NonZeroU32::new(3).unwrap());
+        let clock = DefaultClock::default();
+        let governor_limiter = KeyedLimiter::new(quota, DashMapStateStore::default(), &clock);
+        let limiter_arc = Arc::new(governor_limiter);
+
+        let ip_key = "192.168.0.1".to_string();
+
+        // Consume initial burst
+        assert!(limiter_arc.check_key(&ip_key).is_ok(), "Burst Req 1");
+        assert!(limiter_arc.check_key(&ip_key).is_ok(), "Burst Req 2");
+        assert!(limiter_arc.check_key(&ip_key).is_ok(), "Burst Req 3");
+        assert!(limiter_arc.check_key(&ip_key).is_err(), "Burst Req 4 (should fail)");
+
+        // Test replenishment (rate is 2rps = 500ms per cell)
+        // Wait just under a cell's replenishment time
+        sleep(Duration::from_millis(480)).await;
+        assert!(limiter_arc.check_key(&ip_key).is_err(), "Req after ~480ms (should still be blocked)");
+
+        // Wait a bit more, enough for one cell to certainly replenish (total ~530ms from last check)
+        sleep(Duration::from_millis(50)).await; // Total sleep = 480 + 50 = 530ms
+        assert!(limiter_arc.check_key(&ip_key).is_ok(), "Req after ~530ms (1 cell should have replenished)");
+        // This cell is now consumed, next immediate one should fail
+        assert!(limiter_arc.check_key(&ip_key).is_err(), "Req immediately after consuming the single replenished cell (should fail)");
+
+        // Wait for 2 more cells to replenish (1 second) + buffer
+        sleep(Duration::from_millis(1000 + 50)).await;
+        assert!(limiter_arc.check_key(&ip_key).is_ok(), "Req after ~1s more (cell 1/2 replenished this interval)");
+        assert!(limiter_arc.check_key(&ip_key).is_ok(), "Req after ~1s more (cell 2/2 replenished this interval)");
+        assert!(limiter_arc.check_key(&ip_key).is_err(), "Req after ~1s more (both replenished cells consumed, should fail)");
+
+        // Wait significantly to allow full burst refill (3 cells * 500ms/cell = 1.5s. Wait 2s.)
+        sleep(Duration::from_secs(2)).await;
+
+        // Consume refilled burst
+        for i in 0..3 {
+            assert!(limiter_arc.check_key(&ip_key).is_ok(),
+                    "Request {} consuming refilled burst should pass", i + 1);
+        }
+
+        // Subsequent requests should hit the rate limit.
+        let mut blocked_after_refill = false;
+        for _ in 0..3 { // Try a few more times, i is not used
+            if limiter_arc.check_key(&ip_key).is_err() {
+                blocked_after_refill = true;
+                break;
+            }
+            sleep(Duration::from_millis(50)).await; // Small delay to allow time to pass if first check was borderline
+        }
+        assert!(blocked_after_refill,
+                "Expected at least one request to be blocked after exhausting refilled burst.");
+    }
+
+    // Note: Testing the full Actix middleware Service/Transform traits (poll_ready, call with ServiceRequest)
+    // is more complex and would typically involve setting up a test Actix service.
+    // The tests above focus on the core rate-limiting logic provided by the governor instance,
+    // which is the heart of this middleware.
+}
+
 // RateLimiterMiddleware struct that wraps the inner service
 pub struct RateLimiterMiddleware<S> {
     service: S,
